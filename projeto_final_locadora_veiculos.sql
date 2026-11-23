@@ -1,6 +1,3 @@
--- Projeto final: locadora de veiculos
--- Compatibilidade: MySQL 8.0.16 ou superior
-
 -- BLOCO 1 - DDL: estrutura do banco
 CREATE DATABASE IF NOT EXISTS locadora_veiculos
     CHARACTER SET utf8mb4
