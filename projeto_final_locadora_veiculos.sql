@@ -1,27 +1,17 @@
--- ============================================================
--- PROJETO FINAL: SISTEMA DE GESTAO DE LOCADORA DE VEICULOS
--- Compatibilidade: MySQL 8.0+
--- Ambiente: MySQL Workbench
--- ============================================================
+-- Projeto final: locadora de veiculos
+-- Compatibilidade: MySQL 8.0.16 ou superior
 
--- ATENCAO: descomente a linha abaixo somente se quiser apagar
--- e recriar um banco existente com o mesmo nome.
--- DROP DATABASE IF EXISTS locadora_veiculos;
-
--- ============================================================
--- BLOCO 1 - DDL (ESTRUTURA)
--- ============================================================
-
+-- BLOCO 1 - DDL: estrutura do banco
 CREATE DATABASE IF NOT EXISTS locadora_veiculos
     CHARACTER SET utf8mb4
-    COLLATE utf8mb4_0900_ai_ci;
+    COLLATE utf8mb4_unicode_ci;
 
 USE locadora_veiculos;
 
 CREATE TABLE IF NOT EXISTS categorias (
     id_categoria INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(50) NOT NULL UNIQUE,
-    descricao VARCHAR(255)
+    descricao VARCHAR(255) NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS clientes (
@@ -29,8 +19,8 @@ CREATE TABLE IF NOT EXISTS clientes (
     nome VARCHAR(120) NOT NULL,
     cpf CHAR(11) NOT NULL UNIQUE,
     cnh VARCHAR(20) NOT NULL UNIQUE,
-    telefone VARCHAR(20),
-    email VARCHAR(120) UNIQUE,
+    telefone VARCHAR(20) NULL,
+    email VARCHAR(120) NULL UNIQUE,
     data_cadastro DATE NOT NULL DEFAULT (CURRENT_DATE)
 ) ENGINE=InnoDB;
 
@@ -40,11 +30,12 @@ CREATE TABLE IF NOT EXISTS veiculos (
     placa VARCHAR(8) NOT NULL UNIQUE,
     marca VARCHAR(50) NOT NULL,
     modelo VARCHAR(60) NOT NULL,
-    ano_fabricacao YEAR NOT NULL,
-    cor VARCHAR(30),
+    ano_fabricacao SMALLINT NOT NULL,
+    cor VARCHAR(30) NULL,
     valor_diaria DECIMAL(10,2) NOT NULL,
     status_veiculo ENUM('ATIVO','INATIVO') NOT NULL DEFAULT 'ATIVO',
     CONSTRAINT chk_veiculo_diaria CHECK (valor_diaria > 0),
+    CONSTRAINT chk_veiculo_ano CHECK (ano_fabricacao BETWEEN 1950 AND 2100),
     CONSTRAINT fk_veiculo_categoria FOREIGN KEY (id_categoria)
         REFERENCES categorias(id_categoria)
         ON UPDATE CASCADE ON DELETE RESTRICT
@@ -60,19 +51,25 @@ CREATE TABLE IF NOT EXISTS locacoes (
     valor_diaria_contratado DECIMAL(10,2) NOT NULL,
     status_locacao ENUM('RESERVADA','EM_ANDAMENTO','CONCLUIDA','CANCELADA')
         NOT NULL DEFAULT 'RESERVADA',
-    observacoes VARCHAR(500),
-    CONSTRAINT chk_locacao_periodo CHECK (devolucao_prevista > data_retirada),
-    CONSTRAINT chk_locacao_diaria CHECK (valor_diaria_contratado > 0),
-    CONSTRAINT chk_locacao_devolucao CHECK (
-        devolucao_real IS NULL OR devolucao_real >= data_retirada
-    ),
+    observacoes VARCHAR(500) NULL,
+    -- Tabela associativa: resolve o relacionamento N:M entre clientes e veiculos.
+    -- O valor contratado preserva o preco acordado, mesmo se a diaria do veiculo mudar.
+    CONSTRAINT chk_locacao_periodo
+        CHECK (devolucao_prevista > data_retirada),
+    CONSTRAINT chk_locacao_diaria
+        CHECK (valor_diaria_contratado > 0),
+    CONSTRAINT chk_locacao_devolucao
+        CHECK (devolucao_real IS NULL OR devolucao_real >= data_retirada),
+    CONSTRAINT chk_locacao_concluida
+        CHECK (status_locacao <> 'CONCLUIDA' OR devolucao_real IS NOT NULL),
     CONSTRAINT fk_locacao_cliente FOREIGN KEY (id_cliente)
         REFERENCES clientes(id_cliente)
         ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_locacao_veiculo FOREIGN KEY (id_veiculo)
         REFERENCES veiculos(id_veiculo)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    INDEX idx_locacao_veiculo_periodo (id_veiculo, data_retirada, devolucao_prevista),
+    INDEX idx_locacao_veiculo_periodo
+        (id_veiculo, data_retirada, devolucao_prevista),
     INDEX idx_locacao_cliente (id_cliente),
     INDEX idx_locacao_status (status_locacao)
 ) ENGINE=InnoDB;
@@ -82,11 +79,12 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     id_locacao INT NOT NULL,
     data_pagamento DATETIME NULL,
     valor DECIMAL(10,2) NOT NULL,
-    forma_pagamento ENUM('PIX','CREDITO','DEBITO','DINHEIRO','TRANSFERENCIA')
-        NOT NULL,
+    forma_pagamento ENUM('PIX','CREDITO','DEBITO','DINHEIRO','TRANSFERENCIA') NOT NULL,
     status_pagamento ENUM('PENDENTE','PAGO','ESTORNADO') NOT NULL DEFAULT 'PENDENTE',
-    descricao VARCHAR(255),
+    descricao VARCHAR(255) NULL,
     CONSTRAINT chk_pagamento_valor CHECK (valor > 0),
+    CONSTRAINT chk_pagamento_pago
+        CHECK (status_pagamento <> 'PAGO' OR data_pagamento IS NOT NULL),
     CONSTRAINT fk_pagamento_locacao FOREIGN KEY (id_locacao)
         REFERENCES locacoes(id_locacao)
         ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -100,12 +98,12 @@ CREATE TABLE IF NOT EXISTS manutencoes (
     data_saida DATE NULL,
     descricao VARCHAR(255) NOT NULL,
     custo DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    status_manutencao ENUM('ABERTA','EM_EXECUCAO','CONCLUIDA')
-        NOT NULL DEFAULT 'ABERTA',
+    status_manutencao ENUM('ABERTA','EM_EXECUCAO','CONCLUIDA') NOT NULL DEFAULT 'ABERTA',
     CONSTRAINT chk_manutencao_custo CHECK (custo >= 0),
-    CONSTRAINT chk_manutencao_datas CHECK (
-        data_saida IS NULL OR data_saida >= data_entrada
-    ),
+    CONSTRAINT chk_manutencao_datas
+        CHECK (data_saida IS NULL OR data_saida >= data_entrada),
+    CONSTRAINT chk_manutencao_concluida
+        CHECK (status_manutencao <> 'CONCLUIDA' OR data_saida IS NOT NULL),
     CONSTRAINT fk_manutencao_veiculo FOREIGN KEY (id_veiculo)
         REFERENCES veiculos(id_veiculo)
         ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -119,25 +117,22 @@ CREATE TABLE IF NOT EXISTS vistorias (
     data_vistoria DATETIME NOT NULL,
     quilometragem INT UNSIGNED NOT NULL,
     nivel_combustivel TINYINT UNSIGNED NOT NULL,
-    observacoes VARCHAR(500),
-    CONSTRAINT chk_vistoria_combustivel CHECK (nivel_combustivel BETWEEN 0 AND 100),
+    observacoes VARCHAR(500) NULL,
+    CONSTRAINT chk_vistoria_combustivel
+        CHECK (nivel_combustivel BETWEEN 0 AND 100),
     CONSTRAINT fk_vistoria_locacao FOREIGN KEY (id_locacao)
         REFERENCES locacoes(id_locacao)
         ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT uq_vistoria_tipo UNIQUE (id_locacao, tipo_vistoria)
 ) ENGINE=InnoDB;
 
--- ============================================================
--- BLOCO 2 - DML (CARGA DE DADOS FICTICIOS)
--- IDs explicitos facilitam acompanhar os exemplos nas consultas.
--- ============================================================
-
+-- BLOCO 2 - DML: 5 a 8 registros ficticios por tabela
 INSERT INTO categorias (id_categoria, nome, descricao) VALUES
-(1, 'Economico', 'Veiculos compactos para uso urbano'),
-(2, 'Intermediario', 'Veiculos com mais espaco e conforto'),
-(3, 'SUV', 'Veiculos utilitarios esportivos'),
-(4, 'Executivo', 'Veiculos de categoria superior'),
-(5, 'Utilitario', 'Veiculos para transporte de cargas');
+(1, 'Econômico', 'Veículos compactos para uso urbano'),
+(2, 'Intermediário', 'Veículos com mais espaço e conforto'),
+(3, 'SUV', 'Veículos utilitários esportivos'),
+(4, 'Executivo', 'Veículos de categoria superior'),
+(5, 'Utilitário', 'Veículos para transporte de cargas');
 
 INSERT INTO clientes
 (id_cliente, nome, cpf, cnh, telefone, email, data_cadastro) VALUES
@@ -159,81 +154,67 @@ INSERT INTO veiculos
 (6, 4, 'QRS7T89', 'BMW', '320i', 2023, 'Preto', 499.90, 'ATIVO'),
 (7, 5, 'UVW1X23', 'Fiat', 'Fiorino', 2022, 'Branco', 199.90, 'ATIVO');
 
--- Periodos de exemplo; locacoes concluidas e futuras/em andamento
--- foram selecionadas para demonstrar diferentes consultas.
 INSERT INTO locacoes
 (id_locacao, id_cliente, id_veiculo, data_retirada, devolucao_prevista,
  devolucao_real, valor_diaria_contratado, status_locacao, observacoes) VALUES
-(1, 1, 1, '2026-10-02 09:00:00', '2026-10-05 09:00:00', '2026-10-05 08:40:00', 129.90, 'CONCLUIDA', 'Locacao finalizada sem ocorrencias'),
-(2, 2, 3, '2026-10-10 10:00:00', '2026-10-13 10:00:00', '2026-10-13 11:00:00', 219.90, 'CONCLUIDA', 'Devolucao registrada'),
-(3, 3, 2, '2026-10-20 08:00:00', '2026-10-23 08:00:00', '2026-10-23 08:00:00', 139.90, 'CONCLUIDA', 'Locacao finalizada'),
+(1, 1, 1, '2026-10-02 09:00:00', '2026-10-05 09:00:00', '2026-10-05 08:40:00', 129.90, 'CONCLUIDA', 'Locação finalizada sem ocorrências'),
+(2, 2, 3, '2026-10-10 10:00:00', '2026-10-13 10:00:00', '2026-10-13 11:00:00', 219.90, 'CONCLUIDA', 'Devolução registrada'),
+(3, 3, 2, '2026-10-20 08:00:00', '2026-10-23 08:00:00', '2026-10-23 08:00:00', 139.90, 'CONCLUIDA', 'Locação finalizada'),
 (4, 1, 4, '2026-11-02 09:00:00', '2026-11-06 09:00:00', NULL, 289.90, 'EM_ANDAMENTO', 'Viagem em andamento'),
-(5, 4, 5, '2026-11-08 09:00:00', '2026-11-11 09:00:00', NULL, 189.90, 'RESERVADA', 'Reserva futura'),
-(6, 5, 1, '2026-11-12 10:00:00', '2026-11-15 10:00:00', NULL, 129.90, 'RESERVADA', 'Reserva futura'),
-(7, 6, 6, '2026-09-05 09:00:00', '2026-09-07 09:00:00', '2026-09-07 09:00:00', 499.90, 'CONCLUIDA', 'Locacao executiva'),
-(8, 7, 7, '2026-10-25 08:00:00', '2026-10-28 08:00:00', '2026-10-28 08:00:00', 199.90, 'CONCLUIDA', 'Locacao utilitaria');
+(5, 4, 5, '2026-11-25 09:00:00', '2026-11-28 09:00:00', NULL, 189.90, 'RESERVADA', 'Reserva futura'),
+(6, 5, 1, '2026-11-26 10:00:00', '2026-11-29 10:00:00', NULL, 129.90, 'RESERVADA', 'Reserva futura'),
+(7, 6, 6, '2026-09-05 09:00:00', '2026-09-07 09:00:00', '2026-09-07 09:00:00', 499.90, 'CONCLUIDA', 'Locação executiva'),
+(8, 7, 7, '2026-10-25 08:00:00', '2026-10-28 08:00:00', '2026-10-28 08:00:00', 199.90, 'CONCLUIDA', 'Locação utilitária');
 
 INSERT INTO pagamentos
 (id_pagamento, id_locacao, data_pagamento, valor, forma_pagamento, status_pagamento, descricao) VALUES
-(1, 1, '2026-10-02 09:05:00', 389.70, 'PIX', 'PAGO', 'Pagamento da locacao 1'),
-(2, 2, '2026-10-10 10:05:00', 659.70, 'CREDITO', 'PAGO', 'Pagamento da locacao 2'),
-(3, 3, '2026-10-20 08:05:00', 419.70, 'DEBITO', 'PAGO', 'Pagamento da locacao 3'),
-(4, 4, '2026-11-02 09:10:00', 500.00, 'PIX', 'PAGO', 'Entrada da locacao 4'),
-(5, 4, NULL, 659.60, 'PIX', 'PENDENTE', 'Saldo previsto da locacao 4'),
-(6, 5, NULL, 569.70, 'CREDITO', 'PENDENTE', 'Pagamento aguardando confirmacao'),
-(7, 7, '2026-09-05 09:10:00', 999.80, 'TRANSFERENCIA', 'PAGO', 'Pagamento da locacao 7'),
-(8, 8, '2026-10-25 08:10:00', 599.70, 'PIX', 'PAGO', 'Pagamento da locacao 8');
+(1, 1, '2026-10-02 09:05:00', 389.70, 'PIX', 'PAGO', 'Pagamento da locação 1'),
+(2, 2, '2026-10-10 10:05:00', 659.70, 'CREDITO', 'PAGO', 'Pagamento da locação 2'),
+(3, 3, '2026-10-20 08:05:00', 419.70, 'DEBITO', 'PAGO', 'Pagamento da locação 3'),
+(4, 4, '2026-11-02 09:10:00', 500.00, 'PIX', 'PAGO', 'Entrada da locação 4'),
+(5, 4, NULL, 659.60, 'PIX', 'PENDENTE', 'Saldo previsto da locação 4'),
+(6, 5, NULL, 569.70, 'CREDITO', 'PENDENTE', 'Pagamento aguardando confirmação'),
+(7, 7, '2026-09-05 09:10:00', 999.80, 'TRANSFERENCIA', 'PAGO', 'Pagamento da locação 7'),
+(8, 8, '2026-10-25 08:10:00', 599.70, 'PIX', 'PAGO', 'Pagamento da locação 8');
 
 INSERT INTO manutencoes
 (id_manutencao, id_veiculo, data_entrada, data_saida, descricao, custo, status_manutencao) VALUES
-(1, 1, '2026-08-10', '2026-08-11', 'Troca de oleo e filtros', 380.00, 'CONCLUIDA'),
-(2, 2, '2026-09-15', '2026-09-16', 'Revisao preventiva', 520.00, 'CONCLUIDA'),
+(1, 1, '2026-08-10', '2026-08-11', 'Troca de óleo e filtros', 380.00, 'CONCLUIDA'),
+(2, 2, '2026-09-15', '2026-09-16', 'Revisão preventiva', 520.00, 'CONCLUIDA'),
 (3, 3, '2026-10-01', '2026-10-02', 'Troca de pastilhas de freio', 740.00, 'CONCLUIDA'),
-(4, 4, '2026-11-20', NULL, 'Avaliacao de suspensao', 350.00, 'EM_EXECUCAO'),
+(4, 4, '2026-11-20', NULL, 'Avaliação de suspensão', 350.00, 'EM_EXECUCAO'),
 (5, 5, '2026-07-12', '2026-07-12', 'Alinhamento e balanceamento', 180.00, 'CONCLUIDA'),
-(6, 6, '2026-06-02', '2026-06-04', 'Revisao geral', 1250.00, 'CONCLUIDA');
+(6, 6, '2026-06-02', '2026-06-04', 'Revisão geral', 1250.00, 'CONCLUIDA');
 
 INSERT INTO vistorias
 (id_vistoria, id_locacao, tipo_vistoria, data_vistoria, quilometragem, nivel_combustivel, observacoes) VALUES
-(1, 1, 'RETIRADA', '2026-10-02 09:00:00', 25400, 100, 'Veiculo entregue limpo'),
+(1, 1, 'RETIRADA', '2026-10-02 09:00:00', 25400, 100, 'Veículo entregue limpo'),
 (2, 1, 'DEVOLUCAO', '2026-10-05 08:40:00', 25720, 75, 'Sem danos aparentes'),
 (3, 2, 'RETIRADA', '2026-10-10 10:00:00', 41300, 90, 'Pequeno risco preexistente anotado'),
 (4, 2, 'DEVOLUCAO', '2026-10-13 11:00:00', 41880, 60, 'Risco conferido'),
-(5, 3, 'RETIRADA', '2026-10-20 08:00:00', 18700, 100, 'Sem observacoes'),
+(5, 3, 'RETIRADA', '2026-10-20 08:00:00', 18700, 100, 'Sem observações'),
 (6, 3, 'DEVOLUCAO', '2026-10-23 08:00:00', 19020, 80, 'Sem danos aparentes'),
-(7, 7, 'RETIRADA', '2026-09-05 09:00:00', 12000, 100, 'Veiculo conferido'),
-(8, 7, 'DEVOLUCAO', '2026-09-07 09:00:00', 12350, 50, 'Devolucao regular');
+(7, 7, 'RETIRADA', '2026-09-05 09:00:00', 12000, 100, 'Veículo conferido'),
+(8, 7, 'DEVOLUCAO', '2026-09-07 09:00:00', 12350, 50, 'Devolução regular');
 
--- ============================================================
--- BLOCO 3 - DQL (CONSULTAS E RELATORIOS)
--- ============================================================
-
--- CONSULTA 1: Historico de locacoes por cliente
-SELECT
-    l.id_locacao,
-    c.nome AS cliente,
-    v.marca,
-    v.modelo,
-    v.placa,
-    l.data_retirada,
-    l.devolucao_prevista,
-    l.status_locacao
+-- BLOCO 3 - DQL: consultas e relatorios
+-- Histórico de locações por cliente
+SELECT l.id_locacao, c.nome AS cliente, v.marca, v.modelo, v.placa,
+       l.data_retirada, l.devolucao_prevista, l.status_locacao
 FROM locacoes l
-INNER JOIN clientes c ON c.id_cliente = l.id_cliente
-INNER JOIN veiculos v ON v.id_veiculo = l.id_veiculo
+JOIN clientes c ON c.id_cliente = l.id_cliente
+JOIN veiculos v ON v.id_veiculo = l.id_veiculo
 WHERE l.status_locacao <> 'CANCELADA'
 ORDER BY l.data_retirada DESC;
 
--- CONSULTA 2: Veiculos sem locacao conflitante para o periodo informado.
--- Ajuste as datas do periodo conforme a demonstracao.
--- Esta consulta verifica locacoes nao canceladas e manutencoes nao concluidas.
-SET @inicio_periodo = '2026-11-09 08:00:00';
-SET @fim_periodo    = '2026-11-10 08:00:00';
+-- Veículos disponíveis em um período
+SET @inicio_periodo = '2026-11-25 08:00:00';
+SET @fim_periodo = '2026-11-26 08:00:00';
 
-SELECT v.id_veiculo, v.placa, v.marca, v.modelo, cat.nome AS categoria,
-       v.valor_diaria
+SELECT v.id_veiculo, v.placa, v.marca, v.modelo,
+       cat.nome AS categoria, v.valor_diaria
 FROM veiculos v
-INNER JOIN categorias cat ON cat.id_categoria = v.id_categoria
+JOIN categorias cat ON cat.id_categoria = v.id_categoria
 WHERE v.status_veiculo = 'ATIVO'
   AND NOT EXISTS (
       SELECT 1
@@ -253,11 +234,10 @@ WHERE v.status_veiculo = 'ATIVO'
   )
 ORDER BY v.valor_diaria, v.modelo;
 
--- CONSULTA 3: Total recebido por mes (considera somente pagamentos confirmados)
-SELECT
-    DATE_FORMAT(data_pagamento, '%Y-%m') AS mes,
-    SUM(valor) AS total_recebido,
-    COUNT(*) AS quantidade_pagamentos
+-- Total recebido por mês em 2026
+SELECT DATE_FORMAT(data_pagamento, '%Y-%m') AS mes,
+       SUM(valor) AS total_recebido,
+       COUNT(*) AS quantidade_pagamentos
 FROM pagamentos
 WHERE status_pagamento = 'PAGO'
   AND data_pagamento >= '2026-01-01'
@@ -265,13 +245,9 @@ WHERE status_pagamento = 'PAGO'
 GROUP BY DATE_FORMAT(data_pagamento, '%Y-%m')
 ORDER BY mes;
 
--- CONSULTA 4: Veiculos mais alugados
-SELECT
-    v.id_veiculo,
-    v.marca,
-    v.modelo,
-    v.placa,
-    COUNT(l.id_locacao) AS quantidade_locacoes
+-- Veículos com mais locações concluídas
+SELECT v.id_veiculo, v.marca, v.modelo, v.placa,
+       COUNT(l.id_locacao) AS quantidade_locacoes
 FROM veiculos v
 LEFT JOIN locacoes l
     ON l.id_veiculo = v.id_veiculo
@@ -280,50 +256,31 @@ WHERE v.status_veiculo = 'ATIVO'
 GROUP BY v.id_veiculo, v.marca, v.modelo, v.placa
 ORDER BY quantidade_locacoes DESC, v.modelo;
 
--- CONSULTA 5: Pagamentos pendentes
-SELECT
-    p.id_pagamento,
-    l.id_locacao,
-    c.nome AS cliente,
-    v.modelo AS veiculo,
-    p.valor,
-    p.forma_pagamento,
-    p.status_pagamento
+-- Pagamentos pendentes
+SELECT p.id_pagamento, l.id_locacao, c.nome AS cliente,
+       v.modelo AS veiculo, p.valor,
+       p.forma_pagamento, p.status_pagamento
 FROM pagamentos p
-INNER JOIN locacoes l ON l.id_locacao = p.id_locacao
-INNER JOIN clientes c ON c.id_cliente = l.id_cliente
-INNER JOIN veiculos v ON v.id_veiculo = l.id_veiculo
+JOIN locacoes l ON l.id_locacao = p.id_locacao
+JOIN clientes c ON c.id_cliente = l.id_cliente
+JOIN veiculos v ON v.id_veiculo = l.id_veiculo
 WHERE p.status_pagamento = 'PENDENTE'
 ORDER BY l.data_retirada, c.nome;
 
--- CONSULTA 6: Custo total de manutencao por veiculo
-SELECT
-    v.id_veiculo,
-    v.placa,
-    v.marca,
-    v.modelo,
-    COUNT(m.id_manutencao) AS quantidade_manutencoes,
-    COALESCE(SUM(m.custo), 0) AS custo_total_manutencao
+-- Custo de manutenção por veículo
+SELECT v.id_veiculo, v.placa, v.marca, v.modelo,
+       COUNT(m.id_manutencao) AS quantidade_manutencoes,
+       COALESCE(SUM(m.custo), 0) AS custo_total_manutencao
 FROM veiculos v
 LEFT JOIN manutencoes m ON m.id_veiculo = v.id_veiculo
 GROUP BY v.id_veiculo, v.placa, v.marca, v.modelo
 ORDER BY custo_total_manutencao DESC, v.modelo;
 
--- CONSULTA EXTRA: Clientes com mais locacoes concluidas
-SELECT
-    c.id_cliente,
-    c.nome,
-    COUNT(l.id_locacao) AS locacoes_concluidas
+-- Clientes com mais locações concluídas
+SELECT c.id_cliente, c.nome,
+       COUNT(l.id_locacao) AS locacoes_concluidas
 FROM clientes c
-INNER JOIN locacoes l ON l.id_cliente = c.id_cliente
+JOIN locacoes l ON l.id_cliente = c.id_cliente
 WHERE l.status_locacao = 'CONCLUIDA'
 GROUP BY c.id_cliente, c.nome
 ORDER BY locacoes_concluidas DESC, c.nome;
-
--- ============================================================
--- FIM DO SCRIPT
--- Observacao: este projeto demonstra a estrutura e consultas.
--- Regras operacionais como bloqueio transacional de conflitos
--- de agenda exigem validacao adicional na aplicacao ou rotinas
--- de banco (por exemplo, transacoes/procedures/triggers).
--- ============================================================
